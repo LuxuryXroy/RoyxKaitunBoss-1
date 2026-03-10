@@ -134,28 +134,6 @@ local function AutoHaki()
     end)
 end
 
--- ─── Find Melee Weapon ───
-local function FindMeleeWeapon()
-    local backpack = Plr:WaitForChild("Backpack")
-    for _, tool in ipairs(backpack:GetChildren()) do
-        if tool:IsA("Tool") then
-            -- ToolTip == "Melee" hoặc tên là "Combat"
-            if tool.ToolTip == "Melee" or tool.Name == "Combat" then
-                return tool.Name
-            end
-        end
-    end
-    return nil
-end
-
--- ─── Click (VirtualInputManager) ───
-local function Click()
-    local vim = game:GetService("VirtualInputManager")
-    vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    task.wait(0.05)
-    vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
 -- ─── Equip Tool ───
 local function EquipTool(name)
     if not name then return end
@@ -166,20 +144,113 @@ local function EquipTool(name)
     end
 end
 
--- ─── Attack Target (Melee + Click only) ───
+-- ─── Attack System (RegisterHit) ───
+local _u4 = nil
+local _u5 = nil
+
+-- Lắng nghe RemoteEvent có Id trong các thư mục RS
+local _watchFolders = {
+    ReplicatedStorage:WaitForChild("Util", 5),
+    ReplicatedStorage:WaitForChild("Common", 5),
+    ReplicatedStorage:WaitForChild("Remotes", 5),
+    ReplicatedStorage:WaitForChild("Assets", 5),
+    ReplicatedStorage:WaitForChild("FX", 5),
+}
+
+for _, folder in pairs(_watchFolders) do
+    if not folder then continue end
+    for _, child in pairs(folder:GetChildren()) do
+        if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+            _u5 = child:GetAttribute("Id")
+            _u4 = child
+        end
+    end
+    folder.ChildAdded:Connect(function(child)
+        if child:IsA("RemoteEvent") and child:GetAttribute("Id") then
+            _u5 = child:GetAttribute("Id")
+            _u4 = child
+        end
+    end)
+end
+
+-- Auto Attack loop (RegisterHit) — chạy liên tục khi _G.KaitunAllBoss bật
+task.spawn(function()
+    while task.wait(0.0001) do
+        if not _G.KaitunAllBoss then task.wait(0.5) continue end
+        pcall(function()
+            local _Character = Plr.Character
+            if not _Character then return end
+            local v13 = _Character:FindFirstChild("HumanoidRootPart")
+            if not v13 then return end
+
+            local hitTargets = {}
+
+            for _, container in ipairs({workspace.Enemies, workspace.Characters}) do
+                if not container then continue end
+                for _, entity in ipairs(container:GetChildren()) do
+                    local _HRP = entity:FindFirstChild("HumanoidRootPart")
+                    local _Hum = entity:FindFirstChild("Humanoid")
+                    if entity ~= _Character
+                        and _HRP and _Hum
+                        and _Hum.Health > 0
+                        and (_HRP.Position - v13.Position).Magnitude <= 60
+                    then
+                        for _, part in ipairs(entity:GetChildren()) do
+                            if part:IsA("BasePart") then
+                                hitTargets[#hitTargets + 1] = {entity, part}
+                            end
+                        end
+                    end
+                end
+            end
+
+            local _Tool = _Character:FindFirstChildOfClass("Tool")
+            if #hitTargets > 0 and _Tool and (
+                _Tool:GetAttribute("WeaponType") == "Melee" or
+                _Tool:GetAttribute("WeaponType") == "Sword"
+            ) then
+                pcall(function()
+                    require(ReplicatedStorage.Modules.Net):RemoteEvent("RegisterHit", true)
+                    ReplicatedStorage.Modules.Net["RE/RegisterAttack"]:FireServer()
+
+                    local _Head = hitTargets[1][1]:FindFirstChild("Head")
+                    if _Head and _u4 then
+                        ReplicatedStorage.Modules.Net["RE/RegisterHit"]:FireServer(
+                            _Head, hitTargets, {},
+                            tostring(Plr.UserId):sub(2,4) .. tostring(coroutine.running()):sub(11,15)
+                        )
+                        cloneref(_u4):FireServer(
+                            string.gsub("RE/RegisterHit", ".", function(c)
+                                return string.char(bit32.bxor(string.byte(c), math.floor(workspace:GetServerTimeNow() / 10 % 10) + 1))
+                            end),
+                            bit32.bxor(_u5 + 909090, ReplicatedStorage.Modules.Net.seed:InvokeServer() * 2),
+                            _Head, hitTargets
+                        )
+                    end
+                end)
+            end
+        end)
+    end
+end)
+
+-- ─── AttackTarget: Equip melee rồi để loop trên tự đánh ───
 local function AttackTarget(target)
     if not target or not target.Parent then return end
     pcall(function()
         AutoHaki()
-
-        -- Tìm và equip melee
-        local meleeName = FindMeleeWeapon()
-        if meleeName then
-            EquipTool(meleeName)
+        -- Tìm và equip melee/sword từ backpack
+        local backpack = Plr.Backpack
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                local wtype = tool:GetAttribute("WeaponType")
+                if wtype == "Melee" or wtype == "Sword"
+                    or tool.ToolTip == "Melee" or tool.Name == "Combat"
+                then
+                    EquipTool(tool.Name)
+                    break
+                end
+            end
         end
-
-        -- Click để đánh
-        Click()
     end)
 end
 
@@ -282,15 +353,11 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = Plr.PlayerGui
 
--- Dim overlay 50%
-local dimFrame = Instance.new("Frame")
-dimFrame.Name = "Dim"
-dimFrame.Size = UDim2.new(1, 0, 1, 0)
-dimFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-dimFrame.BackgroundTransparency = 0.5
-dimFrame.BorderSizePixel = 0
-dimFrame.ZIndex = 2
-dimFrame.Parent = screenGui
+-- Blur màn hình (làm mờ chứ không làm đen)
+local blurEffect = Instance.new("BlurEffect")
+blurEffect.Name = "KaitunBlur"
+blurEffect.Size = 12
+blurEffect.Parent = game:GetService("Lighting")
 
 -- Info card giữa màn hình
 local card = Instance.new("Frame")
@@ -305,12 +372,7 @@ card.Parent = screenGui
 
 Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
 
-local cardStroke = Instance.new("UIStroke")
-cardStroke.Color = Color3.fromRGB(80, 170, 255)
-cardStroke.Thickness = 2
-cardStroke.Parent = card
-
--- Gradient đẹp bên trong card
+-- Gradient bên trong card
 local grad = Instance.new("UIGradient")
 grad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 20, 50)),
@@ -380,15 +442,10 @@ toggleBtn.Parent = screenGui
 
 Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 10)
 
-local tbStroke = Instance.new("UIStroke")
-tbStroke.Color = Color3.fromRGB(80, 160, 255)
-tbStroke.Thickness = 1.5
-tbStroke.Parent = toggleBtn
-
 toggleBtn.MouseButton1Click:Connect(function()
     uiVisible = not uiVisible
     card.Visible = uiVisible
-    dimFrame.Visible = uiVisible
+    blurEffect.Size = uiVisible and 12 or 0
 end)
 
 -- ─── UI Update loop ───
@@ -432,7 +489,7 @@ task.spawn(function()
                 if not alive then
                     -- Boss chưa spawn → bỏ qua, thử con tiếp theo
                     currentBossName = bossName .. " (Not Spawned)"
-                    task.wait(0.1)
+                    task.wait(0.05)
                     continue
                 end
 
@@ -487,17 +544,33 @@ task.spawn(function()
                 end
             end
 
-            -- Tất cả boss đã kill → đổi server
-            if not anyNotKilled then
-                local allDone = true
-                for _, name in ipairs(bossList) do
-                    if not SkipBoss[name] and not killedBosses[name] then
-                        allDone = false
-                        break
+            -- Kiểm tra xem có boss nào spawn không
+            local anySpawned = false
+            for _, bossName in ipairs(bossList) do
+                if not SkipBoss[bossName] and not killedBosses[bossName] then
+                    local alive, _ = isBossInWorkspace(bossName)
+                    if alive then anySpawned = true break end
+                end
+            end
+
+            -- Không có boss nào spawn → đổi server ngay
+            if not anySpawned then
+                -- Kiểm tra còn boss chưa kill không
+                local hasRemaining = false
+                for _, bossName in ipairs(bossList) do
+                    if not SkipBoss[bossName] and not killedBosses[bossName] then
+                        hasRemaining = true break
                     end
                 end
-                if allDone then
-                    currentBossName = "All Boss Done! Server Hopping..."
+                if hasRemaining then
+                    currentBossName = "No Boss Spawned! Hopping..."
+                    task.wait(1)
+                    killedBosses = {}
+                    Hop()
+                    task.wait(12)
+                else
+                    -- Tất cả đã kill hết
+                    currentBossName = "All Boss Done! Hopping..."
                     task.wait(1)
                     killedBosses = {}
                     Hop()
