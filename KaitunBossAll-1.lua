@@ -86,36 +86,62 @@ local currentBossName = "Searching..."
 local currentDistance = 0
 local uiVisible = true
 
--- ─── Tween Bay (350, ổn định không giật) ───
-local function tweenTo(targetCF)
+-- ─── Bay tới trên đầu boss và GHİM ở đó (BodyPosition, không rơi) ───
+local _currentBP = nil  -- BodyPosition đang giữ vị trí
+
+local function clearBodyForces(hrp)
+    for _, obj in pairs(hrp:GetChildren()) do
+        if obj:IsA("BodyVelocity") or obj:IsA("BodyGyro")
+        or obj:IsA("BodyPosition") or obj:IsA("AlignPosition")
+        or obj:IsA("AlignOrientation") then
+            obj:Destroy()
+        end
+    end
+    _currentBP = nil
+end
+
+local function tweenTo(targetPos)
+    -- targetPos: Vector3 (vị trí đích, đã tính offset trên đầu boss)
     pcall(function()
         local char = Plr.Character
         if not char then return end
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
-        -- Xóa tất cả force objects cũ
-        for _, obj in pairs(hrp:GetChildren()) do
-            if obj:IsA("BodyVelocity") or obj:IsA("BodyGyro")
-            or obj:IsA("BodyPosition") or obj:IsA("AlignPosition")
-            or obj:IsA("AlignOrientation") then
-                obj:Destroy()
-            end
-        end
+        clearBodyForces(hrp)
 
-        local startPos = hrp.Position
-        local endPos   = targetCF.Position
-        local dist     = (endPos - startPos).Magnitude
+        local dist = (targetPos - hrp.Position).Magnitude
         local duration = math.max(dist / 350, 0.05)
 
-        -- Tween CFrame thẳng, Linear, không bounce
+        -- Tween di chuyển tới đích
         local tw = TweenService:Create(
             hrp,
-            TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.In, 0, false, 0),
-            { CFrame = CFrame.new(endPos) }   -- chỉ di chuyển position, không xoay → không giật
+            TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
+            { CFrame = CFrame.new(targetPos) }
         )
         tw:Play()
         tw.Completed:Wait()
+
+        -- Sau khi tới nơi, ghim bằng BodyPosition để không rơi
+        if hrp and hrp.Parent then
+            local bp = Instance.new("BodyPosition")
+            bp.Name = "KaitunHold"
+            bp.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            bp.D = 1000
+            bp.P = 10000
+            bp.Position = targetPos
+            bp.Parent = hrp
+            _currentBP = bp
+        end
+    end)
+end
+
+-- Cập nhật vị trí ghim theo boss liên tục (theo dõi boss di chuyển)
+local function holdAboveBoss(bossHRP)
+    pcall(function()
+        if _currentBP and bossHRP and bossHRP.Parent then
+            _currentBP.Position = bossHRP.Position + Vector3.new(0, 18, 0)
+        end
     end)
 end
 
@@ -397,7 +423,7 @@ bossLbl.BackgroundTransparency = 1
 bossLbl.Font = Enum.Font.Gotham
 bossLbl.Text = "Boss: Searching..."
 bossLbl.TextColor3 = Color3.fromRGB(240, 240, 255)
-bossLbl.TextSize = 19
+bossLbl.TextSize = 20
 bossLbl.TextXAlignment = Enum.TextXAlignment.Left
 bossLbl.ZIndex = 6
 bossLbl.Parent = card
@@ -497,9 +523,13 @@ task.spawn(function()
 
                         currentDistance = (bossHRP.Position - charHRP.Position).Magnitude
 
-                        -- Bay đến boss (offset Y để không trùng vị trí)
-                        local targetCF = bossHRP.CFrame * CFrame.new(0, 18, 0)
-                        tweenTo(targetCF)
+                        -- Bay lên đầu boss và ghim ở đó
+                        local targetPos = bossHRP.Position + Vector3.new(0, 18, 0)
+                        if currentDistance > 5 then
+                            tweenTo(targetPos)
+                        else
+                            holdAboveBoss(bossHRP)
+                        end
 
                         -- Buso + tấn công
                         AutoHaki()
@@ -520,9 +550,13 @@ task.spawn(function()
                 until not _G.KaitunAllBoss
                     or not isBossInWorkspace(bossName)
 
-                -- Boss đã chết
+                -- Boss đã chết → bỏ ghim
                 local stillAlive, _ = isBossInWorkspace(bossName)
                 if not stillAlive then
+                    pcall(function()
+                        local hrp = Plr.Character and Plr.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then clearBodyForces(hrp) end
+                    end)
                     killedBosses[bossName] = true
                     currentBossName = bossName .. " ✓ Killed"
                     task.wait(0.8)
