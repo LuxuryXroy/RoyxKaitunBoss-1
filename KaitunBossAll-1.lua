@@ -320,25 +320,74 @@ local function isBossInWorkspace(name)
     return false, nil
 end
 
--- ─── Server Hop (chỉ vào server >= 8 người) ───
+-- Quét toàn bộ boss trong server một lần, trả về map {shortName -> object}
+local function scanAllLiveBosses()
+    local found = {}
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        local hum = v:FindFirstChild("Humanoid")
+        local hrp = v:FindFirstChild("HumanoidRootPart")
+        if hum and hum.Health > 0 and hrp then
+            -- Lấy tên ngắn (trước dấu [)
+            local short = v.Name:match("^([^%[]+)") or v.Name
+            short = short:gsub("%s+$", "")
+            found[short] = v
+            found[v.Name] = v  -- cả tên đầy đủ
+        end
+    end
+    return found
+end
+
+-- ─── Server Hop: không trùng, chỉ 8-10 người ───
+local _visitedServers = {}  -- lưu server đã từng vào để không bị trùng
+
 local function Hop()
     pcall(function()
-        local data = HttpService:JSONDecode(
-            game:HttpGet("https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
-        )
+        -- Đánh dấu server hiện tại là đã thăm
+        _visitedServers[JobId] = true
+
         local servers = {}
-        for _, s in pairs(data.data) do
-            if s.id ~= JobId
-                and tonumber(s.playing) < tonumber(s.maxPlayers)
-                and tonumber(s.playing) >= 8
-            then
-                table.insert(servers, s.id)
+        local cursor = ""
+
+        -- Quét tối đa 3 trang để tìm đủ server
+        for _page = 1, 3 do
+            local url = "https://games.roblox.com/v1/games/" .. PlaceId
+                .. "/servers/Public?sortOrder=Asc&limit=100"
+                .. (cursor ~= "" and ("&cursor=" .. cursor) or "")
+
+            local ok, data = pcall(function()
+                return HttpService:JSONDecode(game:HttpGet(url))
+            end)
+            if not ok or not data or not data.data then break end
+
+            for _, s in pairs(data.data) do
+                local playing = tonumber(s.playing) or 0
+                local maxP    = tonumber(s.maxPlayers) or 0
+                -- Chỉ lấy server 8-10 người, chưa đầy, và chưa từng vào
+                if playing >= 8 and playing <= 10
+                    and playing < maxP
+                    and not _visitedServers[s.id]
+                then
+                    table.insert(servers, s.id)
+                end
+            end
+
+            if #servers >= 5 then break end  -- đủ lựa chọn rồi dừng
+
+            if data.nextPageCursor and data.nextPageCursor ~= "" and data.nextPageCursor ~= "null" then
+                cursor = data.nextPageCursor
+            else
+                break
             end
         end
+
         if #servers > 0 then
+            -- Chọn ngẫu nhiên trong danh sách để tránh luôn vào 1 server
             local pick = servers[math.random(1, #servers)]
+            _visitedServers[pick] = true  -- đánh dấu trước khi teleport
             TeleportService:TeleportToPlaceInstance(PlaceId, pick, Plr)
         else
+            -- Không tìm được → reset lịch sử và thử lại (trừ server hiện tại)
+            _visitedServers = { [JobId] = true }
             TeleportService:Teleport(PlaceId, Plr)
         end
     end)
@@ -483,6 +532,9 @@ task.spawn(function()
             local bossList = getBossList()
             local anyNotKilled = false
 
+            -- Quét một lần tất cả boss đang sống trong server
+            local liveMap = scanAllLiveBosses()
+
             for _, bossName in ipairs(bossList) do
                 if not _G.KaitunAllBoss then break end
 
@@ -494,8 +546,12 @@ task.spawn(function()
 
                 anyNotKilled = true
 
-                -- Kiểm tra boss có trong workspace không
-                local alive, bossObj = isBossInWorkspace(bossName)
+                -- Tra trong liveMap (đã quét sẵn)
+                local bossObj = liveMap[bossName]
+                local alive = bossObj ~= nil
+                    and bossObj.Parent ~= nil
+                    and bossObj:FindFirstChild("Humanoid") ~= nil
+                    and bossObj.Humanoid.Health > 0
 
                 if not alive then
                     -- Boss chưa spawn → bỏ qua, thử con tiếp theo
