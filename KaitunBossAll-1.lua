@@ -1,92 +1,130 @@
--- ============================================================
---            KAITUN BOSS (ALL) - Auto Farm All Boss
---            By: Kaitun | Blox Fruits Script
--- ============================================================
+-- ╔══════════════════════════════════════╗
+-- ║        KAITUN BOSS (ALL) SCRIPT       ║
+-- ║     Auto Farm All Boss In Server      ║
+-- ╚══════════════════════════════════════╝
 
-local Players        = game:GetService("Players")
-local TeleportService= game:GetService("TeleportService")
-local HttpService    = game:GetService("HttpService")
-local TweenService   = game:GetService("TweenService")
-local RunService     = game:GetService("RunService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
 
-local Plr  = Players.LocalPlayer
+local Plr = Players.LocalPlayer
 local PlaceId = game.PlaceId
-local JobId   = game.JobId
+local JobId = game.JobId
 
--- ─── World detect ────────────────────────────────────────────
-local World1, World2, World3 = false, false, false
-if PlaceId == 2753915549 or PlaceId == 85211729168715 then
-    World1 = true
-elseif PlaceId == 4442272183 or PlaceId == 79091703265657 then
-    World2 = true
-elseif PlaceId == 7449423635 or PlaceId == 100117331123089 then
-    World3 = true
-end
+-- ─── World Detection ───
+local World1 = (PlaceId == 2753915549 or PlaceId == 85211729168715)
+local World2 = (PlaceId == 4442272183 or PlaceId == 79091703265657)
+local World3 = (PlaceId == 7449423635 or PlaceId == 100117331123089)
 
--- ─── TweenSpeed ──────────────────────────────────────────────
-local TweenSpeed = 350
-
--- ─── Boss list per sea (loại trừ Ice Admiral [lv.700]) ───────
-local BossLists = {
-    World1 = {
-        "The Gorilla King",
-        "Bobby",
-        "Yeti",
-        "Mob Leader",
-        "Vice Admiral",
-        "Warden",
-        "Chief Warden",
-        "Swan",
-        "Magma Admiral",
-        "Fishman Lord",
-        "Wysper",
-        "Thunder God",
-        "Cyborg",
-        "Saber Expert",
-    },
-    World2 = {
-        "Diamond",
-        "Jeremy",
-        "Fajita",
-        "Don Swan",
-        "Smoke Admiral",
-        "Cursed Captain",
-        "Darkbeard",
-        "Order",
-        "Awakened Ice Admiral",
-        "Tide Keeper",
-    },
-    World3 = {
-        "Tyrant of the Skies",
-        "Stone",
-        "Island Empress",
-        "Kilo Admiral",
-        "Captain Elephant",
-        "Beautiful Pirate",
-        "rip_indra True Form",
-        "Longma",
-        "Soul Reaper",
-        "Cake Queen",
-    },
+-- ─── Boss Lists Per Sea ───
+local BossListW1 = {
+    "The Gorilla King",
+    "Bobby",
+    "Yeti",
+    "Mob Leader",
+    "Vice Admiral",
+    "Warden",
+    "Chief Warden",
+    "Swan",
+    "Magma Admiral",
+    "Fishman Lord",
+    "Wysper",
+    "Thunder God",
+    "Cyborg",
+    "Saber Expert",
 }
 
--- ─── Lấy đúng boss list theo sea hiện tại ───────────────────
-local function GetCurrentBossList()
-    if World1 then return BossLists.World1
-    elseif World2 then return BossLists.World2
-    elseif World3 then return BossLists.World3
+local BossListW2 = {
+    "Diamond",
+    "Jeremy",
+    "Fajita",
+    "Don Swan",
+    "Smoke Admiral",
+    "Cursed Captain",
+    "Darkbeard",
+    "Order",
+    "Awakened Ice Admiral",
+    "Tide Keeper",
+}
+
+local BossListW3 = {
+    "Terrorshark",
+    "Stone",
+    "Island Empress",
+    "Kilo Admiral",
+    "Captain Elephant",
+    "Beautiful Pirate",
+    "rip_indra True Form",
+    "Longma",
+    "Soul Reaper",
+    "Cake Queen",
+    "Tyrant of the Skies",
+}
+
+-- Boss bị loại trừ
+local SkipBoss = {
+    ["Ice Admiral"] = true,
+}
+
+local function getBossList()
+    if World1 then return BossListW1
+    elseif World2 then return BossListW2
+    elseif World3 then return BossListW3
     end
-    return {}
+    return BossListW1
 end
 
--- ─── Trạng thái ──────────────────────────────────────────────
-_G.KaitunAllBoss     = false
-local killedBosses   = {}
-local currentBossName = ""
+-- ─── State ───
+_G.KaitunAllBoss = true
+local killedBosses = {}
+local currentBossName = "Searching..."
 local currentDistance = 0
+local uiVisible = true
 
--- ─── AutoHaki / Buso ────────────────────────────────────────
+-- ─── Tween Bay (350, không nhảy) ───
+local function tweenTo(cf)
+    local ok, err = pcall(function()
+        local char = Plr.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        -- Xóa velocity cũ tránh giật
+        for _, obj in pairs(hrp:GetChildren()) do
+            if obj:IsA("BodyVelocity") or obj:IsA("BodyGyro") or obj:IsA("BodyPosition") then
+                obj:Destroy()
+            end
+        end
+
+        local dist = (cf.Position - hrp.Position).Magnitude
+        local duration = math.max(dist / 350, 0.05)
+
+        -- Cố định Y để không lên xuống
+        local targetCF = CFrame.new(cf.Position) * (CFrame.new(hrp.Position) - Vector3.new(hrp.Position.X, hrp.Position.Y, hrp.Position.Z))
+        -- Dùng target cf gốc, chỉ giữ stable bằng Linear
+        local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {CFrame = cf})
+        tw:Play()
+
+        -- Không block thread, dùng 1 heartbeat loop nhẹ
+        local elapsed = 0
+        local conn
+        conn = RunService.Heartbeat:Connect(function(dt)
+            elapsed = elapsed + dt
+            if elapsed >= duration + 0.1 then
+                conn:Disconnect()
+            end
+        end)
+        tw.Completed:Wait()
+        conn:Disconnect()
+    end)
+end
+
+-- ─── Auto Buso Haki ───
 local function AutoHaki()
     pcall(function()
         local char = Plr.Character
@@ -96,282 +134,379 @@ local function AutoHaki()
     end)
 end
 
--- Bật Buso ngay khi script chạy
-task.spawn(function()
-    while task.wait(3) do
-        AutoHaki()
-    end
-end)
-
--- ─── Tween bay đến vị trí ────────────────────────────────────
-local function TweenTo(targetCF)
-    pcall(function()
-        local char = Plr.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-
-        -- NoClip
-        for _, p in pairs(char:GetDescendants()) do
-            if p:IsA("BasePart") then p.CanCollide = false end
-        end
-
-        local dist = (targetCF.Position - hrp.Position).Magnitude
-        local t = math.max(dist / TweenSpeed, 0.05)
-        local tw = TweenService:Create(hrp, TweenInfo.new(t, Enum.EasingStyle.Linear), {CFrame = targetCF})
-        tw:Play()
-        tw.Completed:Wait()
-    end)
-end
-
--- ─── Server Hop ──────────────────────────────────────────────
-local function Hop()
-    pcall(function()
-        local cursor = ""
-        local tried  = {}
-        local function fetchServers()
-            local url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"
-            if cursor ~= "" then url = url.."&cursor="..cursor end
-            local data = HttpService:JSONDecode(game:HttpGet(url))
-            if data.nextPageCursor then cursor = data.nextPageCursor end
-            for _, s in pairs(data.data) do
-                if s.id ~= JobId and s.playing < s.maxPlayers and not tried[s.id] then
-                    tried[s.id] = true
-                    pcall(function()
-                        TeleportService:TeleportToPlaceInstance(PlaceId, s.id, Plr)
-                    end)
-                    return
-                end
+-- ─── Find Melee Weapon ───
+local function FindMeleeWeapon()
+    local backpack = Plr:WaitForChild("Backpack")
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            -- ToolTip == "Melee" hoặc tên là "Combat"
+            if tool.ToolTip == "Melee" or tool.Name == "Combat" then
+                return tool.Name
             end
         end
-        for _ = 1, 5 do
-            fetchServers()
-            task.wait(0.5)
+    end
+    return nil
+end
+
+-- ─── Click (VirtualInputManager) ───
+local function Click()
+    local vim = game:GetService("VirtualInputManager")
+    vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.05)
+    vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+end
+
+-- ─── Equip Tool ───
+local function EquipTool(name)
+    if not name then return end
+    local tool = Plr.Backpack:FindFirstChild(name)
+    if tool then
+        Plr.Character.Humanoid:EquipTool(tool)
+        task.wait(0.05)
+    end
+end
+
+-- ─── Attack Target (Melee + Click only) ───
+local function AttackTarget(target)
+    if not target or not target.Parent then return end
+    pcall(function()
+        AutoHaki()
+
+        -- Tìm và equip melee
+        local meleeName = FindMeleeWeapon()
+        if meleeName then
+            EquipTool(meleeName)
         end
-        TeleportService:Teleport(PlaceId, Plr)
+
+        -- Click để đánh
+        Click()
     end)
 end
 
--- ─── Rejoin khi bị văng ──────────────────────────────────────
-Plr.OnTeleport:Connect(function(state)
-    if state == Enum.TeleportState.Failed then
-        TeleportService:Teleport(PlaceId, Plr)
+-- ─── Find Boss ───
+local function findBoss(name)
+    -- Tìm trong workspace.Enemies
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if string.find(v.Name, name, 1, true) then
+            return v
+        end
     end
-end)
+    -- Tìm trong ReplicatedStorage (boss chưa spawn vào)
+    for _, v in pairs(ReplicatedStorage:GetChildren()) do
+        if string.find(v.Name, name, 1, true) then
+            return v
+        end
+    end
+    return nil
+end
 
--- ─── Anti AFK ────────────────────────────────────────────────
-local VirtualUser = game:GetService("VirtualUser")
+local function isBossAlive(boss)
+    if not boss or not boss.Parent then return false end
+    local hum = boss:FindFirstChild("Humanoid")
+    return hum ~= nil and hum.Health > 0
+end
+
+local function isBossInWorkspace(name)
+    for _, v in pairs(workspace.Enemies:GetChildren()) do
+        if string.find(v.Name, name, 1, true) then
+            local hum = v:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 then
+                return true, v
+            end
+        end
+    end
+    return false, nil
+end
+
+-- ─── Server Hop ───
+local function Hop()
+    pcall(function()
+        local data = HttpService:JSONDecode(
+            game:HttpGet("https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+        )
+        local servers = {}
+        for _, s in pairs(data.data) do
+            if s.id ~= JobId and tonumber(s.playing) < tonumber(s.maxPlayers) then
+                table.insert(servers, s.id)
+            end
+        end
+        if #servers > 0 then
+            local pick = servers[math.random(1, #servers)]
+            TeleportService:TeleportToPlaceInstance(PlaceId, pick, Plr)
+        else
+            TeleportService:Teleport(PlaceId, Plr)
+        end
+    end)
+end
+
+-- ─── Anti AFK ───
 Plr.Idled:Connect(function()
     VirtualUser:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
     task.wait(1)
     VirtualUser:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
 end)
 
--- ─── Tìm boss trong Workspace.Enemies hoặc ReplicatedStorage ─
-local function FindBoss(name)
-    local ws = workspace.Enemies:FindFirstChild(name)
-    if ws then return ws end
-    local rs = ReplicatedStorage:FindFirstChild(name)
-    if rs then return rs end
-    return nil
-end
-
--- ─── Kill 1 boss ─────────────────────────────────────────────
-local function KillBoss(bossName)
-    currentBossName = bossName
-    local timeout = 60 -- tối đa 60s chờ boss
-    local t0 = tick()
-
-    -- Chờ boss spawn hoặc bỏ qua
-    while tick() - t0 < timeout do
-        if not _G.KaitunAllBoss then return false end
-        local boss = FindBoss(bossName)
-        if boss then break end
-        task.wait(1)
-    end
-
-    local boss = FindBoss(bossName)
-    if not boss then
-        currentBossName = "Skipped (not spawned): "..bossName
-        return false -- chưa spawn → bỏ qua
-    end
-
-    -- Bay đến boss và tấn công
-    while _G.KaitunAllBoss do
-        pcall(function()
-            boss = FindBoss(bossName)
-            if not boss then return end
-
-            local hrpBoss = boss:FindFirstChild("HumanoidRootPart")
-            local hum     = boss:FindFirstChild("Humanoid")
-            if not hrpBoss or not hum then return end
-            if hum.Health <= 0 then return end
-
-            currentDistance = math.floor((hrpBoss.Position - Plr.Character.HumanoidRootPart.Position).Magnitude)
-
-            AutoHaki()
-            hrpBoss.CanCollide = false
-            hum.WalkSpeed = 0
-            TweenTo(hrpBoss.CFrame * CFrame.new(0, 20, 5))
-            sethiddenproperty(Plr, "SimulationRadius", math.huge)
-        end)
-
-        -- Kiểm tra boss đã chết chưa
-        local b2 = FindBoss(bossName)
-        if not b2 then break end
-        local h = b2:FindFirstChild("Humanoid")
-        if not h or h.Health <= 0 then break end
-        task.wait()
-    end
-
-    currentBossName = "Killed: "..bossName
-    return true
-end
-
--- ─── Main loop: farm tất cả boss trong sea hiện tại ──────────
+-- ─── Auto Rejoin khi bị văng ───
 task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if _G.KaitunAllBoss then
-            local bossList = GetCurrentBossList()
-            local allDone  = true
+    while task.wait(15) do
+        pcall(function()
+            if not game:IsLoaded() then
+                TeleportService:Teleport(PlaceId, Plr)
+            end
+        end)
+    end
+end)
+
+-- ─── NoClip ───
+RunService.Stepped:Connect(function()
+    if _G.KaitunAllBoss then
+        pcall(function()
+            local char = Plr.Character
+            if char then
+                for _, p in pairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = false end
+                end
+            end
+        end)
+    end
+end)
+
+-- ════════════════════════════
+-- ─────── BUILD UI ───────────
+-- ════════════════════════════
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KaitunBossUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = Plr.PlayerGui
+
+-- Dim overlay 50%
+local dimFrame = Instance.new("Frame")
+dimFrame.Name = "Dim"
+dimFrame.Size = UDim2.new(1, 0, 1, 0)
+dimFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+dimFrame.BackgroundTransparency = 0.5
+dimFrame.BorderSizePixel = 0
+dimFrame.ZIndex = 2
+dimFrame.Parent = screenGui
+
+-- Info card giữa màn hình
+local card = Instance.new("Frame")
+card.Name = "Card"
+card.Size = UDim2.new(0, 360, 0, 130)
+card.Position = UDim2.new(0.5, -180, 0.5, -65)
+card.BackgroundColor3 = Color3.fromRGB(8, 12, 24)
+card.BackgroundTransparency = 0.15
+card.BorderSizePixel = 0
+card.ZIndex = 5
+card.Parent = screenGui
+
+Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
+
+local cardStroke = Instance.new("UIStroke")
+cardStroke.Color = Color3.fromRGB(80, 170, 255)
+cardStroke.Thickness = 2
+cardStroke.Parent = card
+
+-- Gradient đẹp bên trong card
+local grad = Instance.new("UIGradient")
+grad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 20, 50)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 8, 20)),
+})
+grad.Rotation = 90
+grad.Parent = card
+
+-- Title: "Kaitun Boss ( All )"
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, 0, 0, 52)
+titleLbl.Position = UDim2.new(0, 0, 0, 6)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.Text = "Kaitun Boss ( All )"
+titleLbl.TextColor3 = Color3.fromRGB(90, 200, 255)
+titleLbl.TextSize = 28
+titleLbl.ZIndex = 6
+titleLbl.Parent = card
+
+-- Separator line
+local sep = Instance.new("Frame")
+sep.Size = UDim2.new(0.85, 0, 0, 1)
+sep.Position = UDim2.new(0.075, 0, 0, 56)
+sep.BackgroundColor3 = Color3.fromRGB(80, 160, 255)
+sep.BackgroundTransparency = 0.5
+sep.BorderSizePixel = 0
+sep.ZIndex = 6
+sep.Parent = card
+
+-- Boss label
+local bossLbl = Instance.new("TextLabel")
+bossLbl.Size = UDim2.new(1, -24, 0, 30)
+bossLbl.Position = UDim2.new(0, 12, 0, 62)
+bossLbl.BackgroundTransparency = 1
+bossLbl.Font = Enum.Font.Gotham
+bossLbl.Text = "Boss: Searching..."
+bossLbl.TextColor3 = Color3.fromRGB(240, 240, 255)
+bossLbl.TextSize = 15
+bossLbl.TextXAlignment = Enum.TextXAlignment.Left
+bossLbl.ZIndex = 6
+bossLbl.Parent = card
+
+-- Distance label
+local distLbl = Instance.new("TextLabel")
+distLbl.Size = UDim2.new(1, -24, 0, 26)
+distLbl.Position = UDim2.new(0, 12, 0, 95)
+distLbl.BackgroundTransparency = 1
+distLbl.Font = Enum.Font.Gotham
+distLbl.Text = "Distance: --"
+distLbl.TextColor3 = Color3.fromRGB(200, 220, 255)
+distLbl.TextSize = 13
+distLbl.TextXAlignment = Enum.TextXAlignment.Left
+distLbl.ZIndex = 6
+distLbl.Parent = card
+
+-- Toggle button (top left, dưới nút avatar roblox ~64px)
+local toggleBtn = Instance.new("ImageButton")
+toggleBtn.Size = UDim2.new(0, 46, 0, 46)
+toggleBtn.Position = UDim2.new(0, 8, 0, 66)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(12, 18, 40)
+toggleBtn.BackgroundTransparency = 0.1
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Image = "rbxassetid://16060333448"
+toggleBtn.ZIndex = 10
+toggleBtn.Parent = screenGui
+
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 10)
+
+local tbStroke = Instance.new("UIStroke")
+tbStroke.Color = Color3.fromRGB(80, 160, 255)
+tbStroke.Thickness = 1.5
+tbStroke.Parent = toggleBtn
+
+toggleBtn.MouseButton1Click:Connect(function()
+    uiVisible = not uiVisible
+    card.Visible = uiVisible
+    dimFrame.Visible = uiVisible
+end)
+
+-- ─── UI Update loop ───
+task.spawn(function()
+    while _G.KaitunAllBoss do
+        task.wait(0.25)
+        pcall(function()
+            bossLbl.Text = "Boss: " .. tostring(currentBossName)
+            distLbl.Text = "Distance: " .. tostring(math.floor(currentDistance))
+        end)
+    end
+end)
+
+-- ═══════════════════════════════
+-- ─── MAIN BOSS FARM LOOP ───────
+-- ═══════════════════════════════
+task.spawn(function()
+    -- Bật buso ngay khi start
+    AutoHaki()
+
+    while _G.KaitunAllBoss do
+        task.wait(0.3)
+        pcall(function()
+            local bossList = getBossList()
+            local anyNotKilled = false
 
             for _, bossName in ipairs(bossList) do
                 if not _G.KaitunAllBoss then break end
 
-                if not killedBosses[bossName] then
-                    currentBossName = "Hunting: "..bossName
-                    local killed = KillBoss(bossName)
-                    if killed then
-                        killedBosses[bossName] = true
-                    end
-                    allDone = false
+                -- Bỏ qua boss bị exclude
+                if SkipBoss[bossName] then continue end
+
+                -- Đã giết rồi
+                if killedBosses[bossName] then continue end
+
+                anyNotKilled = true
+
+                -- Kiểm tra boss có trong workspace không
+                local alive, bossObj = isBossInWorkspace(bossName)
+
+                if not alive then
+                    -- Boss chưa spawn → bỏ qua, thử con tiếp theo
+                    currentBossName = bossName .. " (Not Spawned)"
+                    task.wait(0.1)
+                    continue
+                end
+
+                -- Boss đang sống, bắt đầu farm
+                currentBossName = bossName
+
+                repeat
+                    task.wait(0.1)
+                    pcall(function()
+                        -- Refresh boss object
+                        local _, freshBoss = isBossInWorkspace(bossName)
+                        if not freshBoss then return end
+                        bossObj = freshBoss
+
+                        local bossHRP = bossObj:FindFirstChild("HumanoidRootPart")
+                        if not bossHRP then return end
+
+                        local charHRP = Plr.Character and Plr.Character:FindFirstChild("HumanoidRootPart")
+                        if not charHRP then return end
+
+                        currentDistance = (bossHRP.Position - charHRP.Position).Magnitude
+
+                        -- Bay đến boss (offset Y để không trùng vị trí)
+                        local targetCF = bossHRP.CFrame * CFrame.new(0, 18, 0)
+                        tweenTo(targetCF)
+
+                        -- Buso + tấn công
+                        AutoHaki()
+                        AttackTarget(bossObj)
+
+                        -- Hack boss (disable collision, freeze)
+                        pcall(function()
+                            bossHRP.CanCollide = false
+                            bossHRP.Size = Vector3.new(60, 60, 60)
+                            if bossObj.Humanoid then
+                                bossObj.Humanoid.WalkSpeed = 0
+                                bossObj.Humanoid.JumpPower = 0
+                            end
+                            sethiddenproperty(Plr, "SimulationRadius", math.huge)
+                        end)
+                    end)
+
+                until not _G.KaitunAllBoss
+                    or not isBossInWorkspace(bossName)
+
+                -- Boss đã chết
+                local stillAlive, _ = isBossInWorkspace(bossName)
+                if not stillAlive then
+                    killedBosses[bossName] = true
+                    currentBossName = bossName .. " ✓ Killed"
+                    task.wait(0.8)
                 end
             end
 
-            -- Nếu đã farm hết tất cả boss → đổi server ngay (tối đa 1s)
-            if allDone then
-                currentBossName = "All Bosses Done! Hopping..."
-                killedBosses    = {}
-                task.wait(1)
-                Hop()
+            -- Tất cả boss đã kill → đổi server
+            if not anyNotKilled then
+                local allDone = true
+                for _, name in ipairs(bossList) do
+                    if not SkipBoss[name] and not killedBosses[name] then
+                        allDone = false
+                        break
+                    end
+                end
+                if allDone then
+                    currentBossName = "All Boss Done! Server Hopping..."
+                    task.wait(1)
+                    killedBosses = {}
+                    Hop()
+                    task.wait(12)
+                end
             end
-        end
+        end)
     end
 end)
 
--- ═══════════════════════════════════════════════════════════════
---                          UI
--- ═══════════════════════════════════════════════════════════════
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name           = "KaitunBossUI"
-screenGui.ResetOnSpawn   = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent         = Plr:WaitForChild("PlayerGui")
-
--- ─── Dim overlay (làm mờ 50%) ────────────────────────────────
-local dimFrame = Instance.new("Frame")
-dimFrame.Name            = "DimOverlay"
-dimFrame.Size            = UDim2.new(1, 0, 1, 0)
-dimFrame.BackgroundColor3= Color3.fromRGB(0, 0, 0)
-dimFrame.BackgroundTransparency = 0.5
-dimFrame.BorderSizePixel = 0
-dimFrame.ZIndex          = 1
-dimFrame.Parent          = screenGui
-
--- ─── Main label frame (giữa màn hình) ────────────────────────
-local mainFrame = Instance.new("Frame")
-mainFrame.Name                  = "KaitunFrame"
-mainFrame.AnchorPoint           = Vector2.new(0.5, 0.5)
-mainFrame.Position              = UDim2.new(0.5, 0, 0.5, 0)
-mainFrame.Size                  = UDim2.new(0, 320, 0, 100)
-mainFrame.BackgroundTransparency= 1
-mainFrame.ZIndex                = 2
-mainFrame.Parent                = screenGui
-
--- Title "Kaitun Boss ( All )"
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name              = "TitleLabel"
-titleLabel.Size              = UDim2.new(1, 0, 0, 40)
-titleLabel.Position          = UDim2.new(0, 0, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text              = "Kaitun Boss ( All )"
-titleLabel.TextColor3        = Color3.fromRGB(100, 180, 255)  -- Xanh dương nhạt
-titleLabel.TextScaled        = false
-titleLabel.TextSize          = 26
-titleLabel.Font              = Enum.Font.GothamBold
-titleLabel.ZIndex            = 2
-titleLabel.Parent            = mainFrame
-
--- Boss: ...
-local bossLabel = Instance.new("TextLabel")
-bossLabel.Name              = "BossLabel"
-bossLabel.Size              = UDim2.new(1, 0, 0, 26)
-bossLabel.Position          = UDim2.new(0, 0, 0, 42)
-bossLabel.BackgroundTransparency = 1
-bossLabel.Text              = "Boss: Waiting..."
-bossLabel.TextColor3        = Color3.fromRGB(255, 255, 255)
-bossLabel.TextScaled        = false
-bossLabel.TextSize          = 15
-bossLabel.Font              = Enum.Font.Gotham
-bossLabel.ZIndex            = 2
-bossLabel.Parent            = mainFrame
-
--- Distance: ...
-local distLabel = Instance.new("TextLabel")
-distLabel.Name              = "DistLabel"
-distLabel.Size              = UDim2.new(1, 0, 0, 26)
-distLabel.Position          = UDim2.new(0, 0, 0, 68)
-distLabel.BackgroundTransparency = 1
-distLabel.Text              = "Distance: 0"
-distLabel.TextColor3        = Color3.fromRGB(255, 255, 255)
-distLabel.TextScaled        = false
-distLabel.TextSize          = 15
-distLabel.Font              = Enum.Font.Gotham
-distLabel.ZIndex            = 2
-distLabel.Parent            = mainFrame
-
--- ─── Nút toggle UI (góc trái dưới nút avatar Roblox) ─────────
-local toggleBtn = Instance.new("ImageButton")
-toggleBtn.Name              = "ToggleUIBtn"
-toggleBtn.Size              = UDim2.new(0, 40, 0, 40)
-toggleBtn.Position          = UDim2.new(0, 10, 0, 100) -- dưới avatar Roblox ~y=100
-toggleBtn.BackgroundTransparency = 1
-toggleBtn.Image             = "rbxassetid://16060333448"
-toggleBtn.ZIndex            = 10
-toggleBtn.Parent            = screenGui
-
-local uiVisible = true
-toggleBtn.MouseButton1Click:Connect(function()
-    uiVisible = not uiVisible
-    mainFrame.Visible = uiVisible
-    dimFrame.Visible  = uiVisible
-end)
-
--- ─── Update label mỗi frame ──────────────────────────────────
-RunService.Heartbeat:Connect(function()
-    pcall(function()
-        if _G.KaitunAllBoss then
-            bossLabel.Text  = "Boss: " .. currentBossName
-            distLabel.Text  = "Distance: " .. tostring(currentDistance)
-        else
-            bossLabel.Text  = "Boss: OFF"
-            distLabel.Text  = "Distance: -"
-        end
-
-        -- Cập nhật distance thực
-        if _G.KaitunAllBoss and currentBossName ~= "" then
-            local boss = workspace.Enemies:FindFirstChild(
-                currentBossName:gsub("Hunting: ",""):gsub("Killed: ",""):gsub("Skipped.*","")
-            )
-            if boss and boss:FindFirstChild("HumanoidRootPart") and Plr.Character and Plr.Character:FindFirstChild("HumanoidRootPart") then
-                currentDistance = math.floor((boss.HumanoidRootPart.Position - Plr.Character.HumanoidRootPart.Position).Magnitude)
-            end
-        end
-    end)
-end)
-
--- ─── Bật ngay khi chạy script ────────────────────────────────
-_G.KaitunAllBoss = true
-killedBosses     = {}
-print("[Kaitun] Boss All Farm - STARTED")
+print("[Kaitun] ✓ Auto Boss All Farm - STARTED!")
+print("[Kaitun] Sea: " .. (World1 and "First Sea" or World2 and "Second Sea" or World3 and "Third Sea" or "Unknown"))
