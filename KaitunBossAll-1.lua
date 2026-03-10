@@ -86,41 +86,36 @@ local currentBossName = "Searching..."
 local currentDistance = 0
 local uiVisible = true
 
--- ─── Tween Bay (350, không nhảy) ───
-local function tweenTo(cf)
-    local ok, err = pcall(function()
+-- ─── Tween Bay (350, ổn định không giật) ───
+local function tweenTo(targetCF)
+    pcall(function()
         local char = Plr.Character
         if not char then return end
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return end
 
-        -- Xóa velocity cũ tránh giật
+        -- Xóa tất cả force objects cũ
         for _, obj in pairs(hrp:GetChildren()) do
-            if obj:IsA("BodyVelocity") or obj:IsA("BodyGyro") or obj:IsA("BodyPosition") then
+            if obj:IsA("BodyVelocity") or obj:IsA("BodyGyro")
+            or obj:IsA("BodyPosition") or obj:IsA("AlignPosition")
+            or obj:IsA("AlignOrientation") then
                 obj:Destroy()
             end
         end
 
-        local dist = (cf.Position - hrp.Position).Magnitude
+        local startPos = hrp.Position
+        local endPos   = targetCF.Position
+        local dist     = (endPos - startPos).Magnitude
         local duration = math.max(dist / 350, 0.05)
 
-        -- Cố định Y để không lên xuống
-        local targetCF = CFrame.new(cf.Position) * (CFrame.new(hrp.Position) - Vector3.new(hrp.Position.X, hrp.Position.Y, hrp.Position.Z))
-        -- Dùng target cf gốc, chỉ giữ stable bằng Linear
-        local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut), {CFrame = cf})
+        -- Tween CFrame thẳng, Linear, không bounce
+        local tw = TweenService:Create(
+            hrp,
+            TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.In, 0, false, 0),
+            { CFrame = CFrame.new(endPos) }   -- chỉ di chuyển position, không xoay → không giật
+        )
         tw:Play()
-
-        -- Không block thread, dùng 1 heartbeat loop nhẹ
-        local elapsed = 0
-        local conn
-        conn = RunService.Heartbeat:Connect(function(dt)
-            elapsed = elapsed + dt
-            if elapsed >= duration + 0.1 then
-                conn:Disconnect()
-            end
-        end)
         tw.Completed:Wait()
-        conn:Disconnect()
     end)
 end
 
@@ -133,6 +128,16 @@ local function AutoHaki()
         end
     end)
 end
+
+-- ─── Join Marines ───
+local function JoinMarines()
+    pcall(function()
+        if not Plr.Team or (Plr.Team.Name ~= "Marines") then
+            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("SetTeam", "Marines")
+        end
+    end)
+end
+JoinMarines()
 
 -- ─── Equip Tool ───
 local function EquipTool(name)
@@ -289,7 +294,7 @@ local function isBossInWorkspace(name)
     return false, nil
 end
 
--- ─── Server Hop ───
+-- ─── Server Hop (chỉ vào server >= 8 người) ───
 local function Hop()
     pcall(function()
         local data = HttpService:JSONDecode(
@@ -297,7 +302,10 @@ local function Hop()
         )
         local servers = {}
         for _, s in pairs(data.data) do
-            if s.id ~= JobId and tonumber(s.playing) < tonumber(s.maxPlayers) then
+            if s.id ~= JobId
+                and tonumber(s.playing) < tonumber(s.maxPlayers)
+                and tonumber(s.playing) >= 8
+            then
                 table.insert(servers, s.id)
             end
         end
@@ -359,59 +367,37 @@ blurEffect.Name = "KaitunBlur"
 blurEffect.Size = 12
 blurEffect.Parent = game:GetService("Lighting")
 
--- Info card giữa màn hình
+-- Info card giữa màn hình (không có khung, trong suốt hoàn toàn)
 local card = Instance.new("Frame")
 card.Name = "Card"
-card.Size = UDim2.new(0, 360, 0, 130)
-card.Position = UDim2.new(0.5, -180, 0.5, -65)
-card.BackgroundColor3 = Color3.fromRGB(8, 12, 24)
-card.BackgroundTransparency = 0.15
+card.Size = UDim2.new(0, 380, 0, 140)
+card.Position = UDim2.new(0.5, -190, 0.5, -70)
+card.BackgroundTransparency = 1
 card.BorderSizePixel = 0
 card.ZIndex = 5
 card.Parent = screenGui
 
-Instance.new("UICorner", card).CornerRadius = UDim.new(0, 18)
-
--- Gradient bên trong card
-local grad = Instance.new("UIGradient")
-grad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 20, 50)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 8, 20)),
-})
-grad.Rotation = 90
-grad.Parent = card
-
 -- Title: "Kaitun Boss ( All )"
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size = UDim2.new(1, 0, 0, 52)
-titleLbl.Position = UDim2.new(0, 0, 0, 6)
+titleLbl.Size = UDim2.new(1, 0, 0, 60)
+titleLbl.Position = UDim2.new(0, 0, 0, 4)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Font = Enum.Font.GothamBold
 titleLbl.Text = "Kaitun Boss ( All )"
 titleLbl.TextColor3 = Color3.fromRGB(90, 200, 255)
-titleLbl.TextSize = 28
+titleLbl.TextSize = 42
 titleLbl.ZIndex = 6
 titleLbl.Parent = card
-
--- Separator line
-local sep = Instance.new("Frame")
-sep.Size = UDim2.new(0.85, 0, 0, 1)
-sep.Position = UDim2.new(0.075, 0, 0, 56)
-sep.BackgroundColor3 = Color3.fromRGB(80, 160, 255)
-sep.BackgroundTransparency = 0.5
-sep.BorderSizePixel = 0
-sep.ZIndex = 6
-sep.Parent = card
 
 -- Boss label
 local bossLbl = Instance.new("TextLabel")
 bossLbl.Size = UDim2.new(1, -24, 0, 30)
-bossLbl.Position = UDim2.new(0, 12, 0, 62)
+bossLbl.Position = UDim2.new(0, 12, 0, 68)
 bossLbl.BackgroundTransparency = 1
 bossLbl.Font = Enum.Font.Gotham
 bossLbl.Text = "Boss: Searching..."
 bossLbl.TextColor3 = Color3.fromRGB(240, 240, 255)
-bossLbl.TextSize = 15
+bossLbl.TextSize = 19
 bossLbl.TextXAlignment = Enum.TextXAlignment.Left
 bossLbl.ZIndex = 6
 bossLbl.Parent = card
@@ -419,12 +405,12 @@ bossLbl.Parent = card
 -- Distance label
 local distLbl = Instance.new("TextLabel")
 distLbl.Size = UDim2.new(1, -24, 0, 26)
-distLbl.Position = UDim2.new(0, 12, 0, 95)
+distLbl.Position = UDim2.new(0, 12, 0, 103)
 distLbl.BackgroundTransparency = 1
 distLbl.Font = Enum.Font.Gotham
 distLbl.Text = "Distance: --"
 distLbl.TextColor3 = Color3.fromRGB(200, 220, 255)
-distLbl.TextSize = 13
+distLbl.TextSize = 17
 distLbl.TextXAlignment = Enum.TextXAlignment.Left
 distLbl.ZIndex = 6
 distLbl.Parent = card
@@ -433,8 +419,7 @@ distLbl.Parent = card
 local toggleBtn = Instance.new("ImageButton")
 toggleBtn.Size = UDim2.new(0, 46, 0, 46)
 toggleBtn.Position = UDim2.new(0, 8, 0, 66)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(12, 18, 40)
-toggleBtn.BackgroundTransparency = 0.1
+toggleBtn.BackgroundTransparency = 1
 toggleBtn.BorderSizePixel = 0
 toggleBtn.Image = "rbxassetid://16060333448"
 toggleBtn.ZIndex = 10
